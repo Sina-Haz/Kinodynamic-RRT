@@ -40,6 +40,7 @@ class KRRT:
         self.goal = goal # Stores goal config
         self.t = 0 # Time the simulation has run for
         model = mujoco.MjModel.from_xml_path(xml) # Mujoco model of our environment
+        self.model = model
         self.sim = mujoco.MjSim(model)
         self.xbds = xbounds # where we can sample from on x-axis (np.array w/ shape (2, ))
         self.ybds = ybounds # where we can sample from on y-axis (np.array w/ shape (2, ))
@@ -155,17 +156,32 @@ class KRRT:
         return (curr, collides, self.sim.data.time)
         
 
+    def in_goal(self, state):
+        #id = self.model.site_name2id('target4')
+        goal_pos = self.model.site("target4").pos
+        goal_size = self.model.site("target4").size
+        x_min = goal_pos[0] - (goal_size[0]/2)
+        x_max = goal_pos[0] + (goal_size[0]/2)
+        y_min = goal_pos[1] - (goal_size[1]/2)
+        y_max = goal_pos[1] + (goal_size[1]/2)
+        if (x_min < state.q[0] < x_max):
+            if (y_min < state.q[1] < y_max):
+                return True
+       
+        return False
 
 
 
     
-    def kRRT_PC():
-        '''
-        Sample controls completely at random and apply to x_near to extend the tree
-        '''
-        pass
-    
-    def kRRT_X():
+    def kRRT_X(self, tmax):
         '''
         
         '''
+        while (self.t < tmax):
+            x_rand = self.sample_state()
+            x_near = self.nearest_neighbor(x_rand)
+            u_e, x_e = self.sample_best_ctrl(x_rand, x_near)
+            if (u_e is not None):
+                self.Tree.append(x_e)
+                #check if x_e in goal
+                    #break
