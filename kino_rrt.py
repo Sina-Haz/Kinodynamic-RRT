@@ -255,7 +255,7 @@ class KRRT:
             if collides: 
                 currT += (time.time() - start)
                 continue # Don't do all this if it collides
-            print(x_e == x_near, np.allclose(x_e.q, x_near.q))
+
             x_e.parent = x_near
             x_e.ctrl = u
             self.Tree.append(x_e)
@@ -267,35 +267,6 @@ class KRRT:
             currT += (end - start)
         print(currT)
         return False
-    
-
-
-
-    # def kRRT_PC(self):
-    #     curr = 0
-    #     while curr < T_max: # Small for loop to check functionality
-    #         start = time.time()
-    #         x_rand = sample_non_colliding(sampler_fn=sample_state,
-    #                                       collision_checker=self.set_curr_state,
-    #                                       sample_bounds=np.array([self.xbds, self.ybds]))
-    #         # This is a node within our tree so unless it's the start its guaranteed to have a parent
-    #         x_near = self.nearest_neighbor(x_rand)
-
-    #         u = self.sample_ctrl()
-    #         x_e, collision, _ = self.simulate(x_near, u)
-    #         if not collision:
-    #             x_e.parent = x_rand
-
-    #             x_e.ctrl = u
-    #             self.Tree.append(x_e)
-            
-    #             if self.in_goal(x_e):
-    #                 print(curr + (time.time() - start), len(self.Tree))
-    #                 return True # TODO: replace this with get_path function once Himani implements
-    #         end = time.time()
-    #         curr += (end - start)
-    #     print(curr)
-    #     return False
 
 
 
