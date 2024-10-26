@@ -256,8 +256,9 @@ class KRRT:
             if self.in_goal(x_e):
                 print(currT + (time.time() - start), len(self.Tree))
                 self.visualize_tree()
+                path = self.recreate_path()
                 self.visualize_3D(path)
-                return self.recreate_path() # TODO: replace this with get_path function once Himani implements
+                return path # TODO: replace this with get_path function once Himani implements
             end = time.time()
             currT += (end - start)
         print(currT)
