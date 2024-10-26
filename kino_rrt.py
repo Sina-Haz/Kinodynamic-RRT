@@ -2,6 +2,7 @@
 import numpy as np
 import mujoco
 import mujoco_viewer as mjv
+import matplotlib.pyplot as plt
 from typing import Union, Tuple
 import time
 
@@ -19,6 +20,9 @@ class Node:
     
     def __repr__(self) -> str:
         return f'Node(q = {self.q}, qdot = {self.qdot}, ctrl = {self.ctrl})'
+
+    def __eq__(self, other):
+        return np.array_equal(self.q, other.q) and np.array_equal(self.qdot, other.qdot) and (self.parent == other.parent) and np.array_equal(self.ctrl, other.ctrl)
 
 
 def weighted_euclidean_distance(x1: Node, x2: Node, pw: float = 1, vw: float = 0.1) -> float:
@@ -193,17 +197,6 @@ class KRRT:
         # Get final state
         curr = self.get_curr_state()
         
-        # Debug printing
-        if np.allclose(curr.q, state.q):
-            print(f"Simulation didn't move the robot:")
-            print(f"Initial position: {initial_pos}")
-            print(f"Final position: {self.data.qpos}")
-            print(f"Applied control: {ctrl}")
-            print(f"Timestep: {timestep}")
-            print(f"Number of steps: {num_steps}")
-            print(f"Initial velocity: {initial_vel}")
-            print(f"Final velocity: {self.data.qvel}")
-        
         return curr, collides
         
 
@@ -262,11 +255,45 @@ class KRRT:
 
             if self.in_goal(x_e):
                 print(currT + (time.time() - start), len(self.Tree))
-                return True # TODO: replace this with get_path function once Himani implements
+                self.visualize_tree()
+                return self.recreate_path() # TODO: replace this with get_path function once Himani implements
             end = time.time()
             currT += (end - start)
         print(currT)
-        return False
+        return None
+    
+    def recreate_path(self):
+        '''
+        x_final
+        while curr.parent:
+            add to list (curr)
+            curr = curr.parent
+        '''
+        nodes = self.Tree.copy()
+        nodes.reverse()
+        path = [nodes[0]]
+        parent = nodes[0].parent
+        for node in nodes[:-1]: 
+            #equality is off
+            if (node == parent):
+                path.append(node)
+                parent = node.parent
+        path.append(nodes[-1])
+        path.reverse()
+        return path
+    
+    def visualize_tree(self) :
+        fig, ax = plt.subplots()
+        ax.plot(self.Tree[0].q[0], self.Tree[0].q[1], 'bo', label = 'Start')
+        ax.set_xlim(self.xbds)
+        ax.set_ylim(self.ybds)
+        
+        #maybe graph obstacle?
+        
+        for node in self.Tree[1:]:
+            ax.plot([node.q[0], node.parent.q[0]], [node.q[1], node.parent.q[1]], "-b")
+        plt.show()
+
 
 
 
