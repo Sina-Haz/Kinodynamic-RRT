@@ -8,9 +8,10 @@ import time
 
 xml = 'nav1.xml'
 T_max = 30
+np.set_printoptions(precision=3)
 
 class Node:
-    def __init__(self, q,  qdot=np.array([0, 0]), parent=None) -> None:
+    def __init__(self, q: np.array,  qdot:np.array = np.array([0, 0]), parent=None) -> None:
         self.q = q
         self.qdot = qdot
         self.parent = parent
@@ -98,7 +99,7 @@ class KRRT:
         This function indexes into the current mujoco data and returns a node containing the current configuration
         and velocity of the robot at this point in time
         '''
-        return Node(self.data.qpos, self.data.qvel)
+        return Node(np.copy(self.data.qpos), np.copy(self.data.qvel))
 
     def set_curr_state(self, x: Node)->bool:
         '''
@@ -110,7 +111,7 @@ class KRRT:
         self.data.qpos[:] = x.q
         self.data.qvel[:] = x.qdot
 
-        mujoco.mj_step(self.model, self.data) # step the simulation to update collision data
+        mujoco.mj_forward(self.model, self.data) # step the simulation to update collision data
 
         self.data.time = 0 # Set the model time to 0
 
@@ -151,41 +152,63 @@ class KRRT:
          - Simulates each, starting at x1, for dt duration
          - Returns the sampled control that generates state with minimum distance from x2
 
-         Either returns the best control and x_e or None and x1 if all of sampled the controls resulted in a collision
+         Either returns the best control and x_e or None and None if all of sampled the controls resulted in a collision
         '''
 
         sample_ctrls = [self.sample_ctrl() for _ in range(n)]
         min_dist = float('inf')
-        best_ctrl, x_e = None, x1
+        best_ctrl, x_e = None, None
 
         for ctrl in sample_ctrls:
             x_e, collides, t = self.simulate(x1, ctrl, dt)
-            if not collides:
+            if x_e is not None and not collides:
                 dist = distance_metric(x_e, x2)
                 if dist < min_dist:
                     min_dist = dist
-                    best_ctrl = ctrl
+                    best_ctrl = np.array(ctrl)
         return best_ctrl, x_e
 
 
 
-    def simulate(self, state, ctrl, dt=0.1) -> Tuple[Node, bool, float]:
+    def simulate(self, state, ctrl, dt=0.1) -> Tuple[Node, bool]:
         '''
         Takes in a start state and control. It applies the control to the state for dt duration.
         Returns the final state, whether or not there was a collision, and how much time passed
         '''
-        collides = not self.set_curr_state(state)
-
-        if collides: return (state, True, 0) # Don't even bother simulating
-
-        while self.data.time < dt:
+        # Reset the simulation state
+        self.set_curr_state(state)
+        self.data.ctrl[:] = ctrl  # Explicitly set all control values
+        self.data.time = 0
+        
+        # Simulation parameters
+        timestep = self.model.opt.timestep  # Get the model's timestep
+        num_steps = int(dt / timestep)  # Calculate number of steps needed
+        
+        collides = False
+        
+        # Run simulation for specified duration
+        for _ in range(num_steps):
             mujoco.mj_step(self.model, self.data)
-            curr = self.get_curr_state()
-            if self.data.ncon > 0: 
+            
+            if self.data.ncon > 0:
                 collides = True
                 break
         
-        return (curr, collides, self.data.time)
+        # Get final state
+        curr = self.get_curr_state()
+        
+        # Debug printing
+        if np.allclose(curr.q, state.q):
+            print(f"Simulation didn't move the robot:")
+            print(f"Initial position: {initial_pos}")
+            print(f"Final position: {self.data.qpos}")
+            print(f"Applied control: {ctrl}")
+            print(f"Timestep: {timestep}")
+            print(f"Number of steps: {num_steps}")
+            print(f"Initial velocity: {initial_vel}")
+            print(f"Final velocity: {self.data.qvel}")
+        
+        return curr, collides
         
 
     def in_goal(self, state: Node):
@@ -220,53 +243,33 @@ class KRRT:
 			    return path(x_0, x_e)
 	    return No Path
         '''
-        curr = 0
-        while curr < T_max: # Small for loop to check functionality
+        currT = 0
+        while currT < T_max: # Small for loop to check functionality
             start = time.time()
-            x_rand = sample_non_colliding(sampler_fn=sample_state,
-                                          collision_checker=self.set_curr_state,
-                                          sample_bounds=np.array([self.xbds, self.ybds]))
-            # This is a node within our tree so unless it's the start its guaranteed to have a parent
-            x_near = self.nearest_neighbor(x_rand)
 
-            u, x_e = self.sample_best_ctrl(x_near, x_rand)
-            if u is not None: #i.e. if there was a control that didn't result in a collision
-                x_e.parent = x_rand
-                x_e.ctrl = u
-                self.Tree.append(x_e)
-            
-                if self.in_goal(x_e):
-                    print(curr + (time.time() - start), len(self.Tree))
-                    path  = self.recreate_path()
-                    return path # TODO: replace this with get_path function once Himani implements
-            end = time.time()
-            curr += (end - start)
-        print(curr)
-        return False
-    
-    def kRRT_PC(self):
-        curr = 0
-        while curr < T_max: # Small for loop to check functionality
-            start = time.time()
             x_rand = sample_non_colliding(sampler_fn=sample_state,
                                           collision_checker=self.set_curr_state,
                                           sample_bounds=np.array([self.xbds, self.ybds]))
+            
             # This is a node within our tree so unless it's the start its guaranteed to have a parent
             x_near = self.nearest_neighbor(x_rand)
 
             u = self.sample_ctrl()
-            x_e, collision, _ = self.simulate(x_near, u)
-            if not collision:
-                x_e.parent = x_rand
-                x_e.ctrl = u
-                self.Tree.append(x_e)
-            
-                if self.in_goal(x_e):
-                    print(curr + (time.time() - start), len(self.Tree))
-                    return True # TODO: replace this with get_path function once Himani implements
+            x_e, collides = self.simulate(x_near, u, dt=0.2)
+            if collides: 
+                currT += (time.time() - start)
+                continue # Don't do all this if it collides
+            print(x_e == x_near, np.allclose(x_e.q, x_near.q))
+            x_e.parent = x_near
+            x_e.ctrl = u
+            self.Tree.append(x_e)
+
+            if self.in_goal(x_e):
+                print(currT + (time.time() - start), len(self.Tree))
+                return True # TODO: replace this with get_path function once Himani implements
             end = time.time()
-            curr += (end - start)
-        print(curr)
+            currT += (end - start)
+        print(currT)
         return False
     
     def recreate_path(self):
@@ -302,10 +305,53 @@ class KRRT:
 
 
 
-# Remember to treat this as a 2D problem since we have no joint on the z-axis
-# Currently the goal attribute not used, maybe change later
-test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-.5, .5])
-print(test1.kRRT())
-#print(test1.kRRT_PC())
+    # def kRRT_PC(self):
+    #     curr = 0
+    #     while curr < T_max: # Small for loop to check functionality
+    #         start = time.time()
+    #         x_rand = sample_non_colliding(sampler_fn=sample_state,
+    #                                       collision_checker=self.set_curr_state,
+    #                                       sample_bounds=np.array([self.xbds, self.ybds]))
+    #         # This is a node within our tree so unless it's the start its guaranteed to have a parent
+    #         x_near = self.nearest_neighbor(x_rand)
 
-# print(test1.Tree)
+    #         u = self.sample_ctrl()
+    #         x_e, collision, _ = self.simulate(x_near, u)
+    #         if not collision:
+    #             x_e.parent = x_rand
+
+    #             x_e.ctrl = u
+    #             self.Tree.append(x_e)
+            
+    #             if self.in_goal(x_e):
+    #                 print(curr + (time.time() - start), len(self.Tree))
+    #                 return True # TODO: replace this with get_path function once Himani implements
+    #         end = time.time()
+    #         curr += (end - start)
+    #     print(curr)
+    #     return False
+
+
+
+# # Remember to treat this as a 2D problem since we have no joint on the z-axis
+# # Currently the goal attribute not used, maybe change later
+test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-1.,1.])
+print(test1.kRRT())
+
+# # print(test1.kRRT_PC())
+# # print(test1.Tree)
+
+
+# s1 = Node(q=np.array([.1,0]))
+# u = np.array([0.5, 0.5])
+# print(u)
+# test1.data.ctrl = u
+# dt = 0.5
+# new, _ = test1.simulate(s1, u, dt=dt)
+# # test1.set_curr_state(s1)
+# # while test1.data.time < dt:
+# #     mujoco.mj_step(test1.model, test1.data)
+# #     new = test1.get_curr_state()
+
+# print(np.allclose(s1.q, new.q))
+
