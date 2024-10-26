@@ -2,6 +2,7 @@
 import numpy as np
 import mujoco
 import mujoco_viewer as mjv
+import matplotlib.pyplot as plt
 from typing import Union, Tuple
 import time
 
@@ -18,6 +19,9 @@ class Node:
     
     def __repr__(self) -> str:
         return f'Node(q = {self.q}, qdot = {self.qdot}, ctrl = {self.ctrl})'
+
+    def __eq__(self, other):
+        return np.array_equal(self.q, other.q) and np.array_equal(self.qdot, other.qdot) and (self.parent == other.parent) and np.array_equal(self.ctrl, other.ctrl)
 
 
 def weighted_euclidean_distance(x1: Node, x2: Node, pw: float = 1, vw: float = 0.1) -> float:
@@ -233,7 +237,8 @@ class KRRT:
             
                 if self.in_goal(x_e):
                     print(curr + (time.time() - start), len(self.Tree))
-                    return True # TODO: replace this with get_path function once Himani implements
+                    path  = self.recreate_path()
+                    return path # TODO: replace this with get_path function once Himani implements
             end = time.time()
             curr += (end - start)
         print(curr)
@@ -263,6 +268,37 @@ class KRRT:
             curr += (end - start)
         print(curr)
         return False
+    
+    def recreate_path(self):
+        nodes = self.Tree.copy()
+        nodes.reverse()
+        path = [nodes[0]]
+        parent = nodes[0].parent
+        for node in nodes[:-1]: 
+            #equality is off
+            if (node == parent):
+                path.append(node)
+                parent = node.parent
+        path.append(nodes[-1])
+        path.reverse()
+        return path
+    
+    def visualize_tree(self) :
+        fig, ax = plt.subplots()
+        ax.plot(self.start.q[0], self.start.q[1], 'bo', label = 'Start')
+        ax.plot(self.goal.q[0], self.goal.q[1], 'ro', label = 'Goal')
+        ax.set_xlim(self.xbds)
+        ax.set_ylim(self.ybds)
+        
+        #maybe graph obstacle?
+        
+        for node in self.Tree[1:]:
+            ax.plot([node.q[0], node.parent.q[0]], [node.q[1], node.parent.q[1]], "-b")
+
+
+
+        
+
 
 
 
@@ -270,5 +306,6 @@ class KRRT:
 # Currently the goal attribute not used, maybe change later
 test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-.5, .5])
 print(test1.kRRT())
-print(test1.kRRT_PC())
+#print(test1.kRRT_PC())
+
 # print(test1.Tree)
