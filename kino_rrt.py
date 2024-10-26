@@ -238,10 +238,37 @@ class KRRT:
             curr += (end - start)
         print(curr)
         return False
+    
+    def kRRT_PC(self):
+        curr = 0
+        while curr < T_max: # Small for loop to check functionality
+            start = time.time()
+            x_rand = sample_non_colliding(sampler_fn=sample_state,
+                                          collision_checker=self.set_curr_state,
+                                          sample_bounds=np.array([self.xbds, self.ybds]))
+            # This is a node within our tree so unless it's the start its guaranteed to have a parent
+            x_near = self.nearest_neighbor(x_rand)
+
+            u = self.sample_ctrl()
+            x_e, collision, _ = self.simulate(x_near, u)
+            if not collision:
+                x_e.parent = x_rand
+                x_e.ctrl = u
+                self.Tree.append(x_e)
+            
+                if self.in_goal(x_e):
+                    print(curr + (time.time() - start), len(self.Tree))
+                    return True # TODO: replace this with get_path function once Himani implements
+            end = time.time()
+            curr += (end - start)
+        print(curr)
+        return False
+
 
 
 # Remember to treat this as a 2D problem since we have no joint on the z-axis
 # Currently the goal attribute not used, maybe change later
 test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-.5, .5])
 print(test1.kRRT())
+print(test1.kRRT_PC())
 # print(test1.Tree)
