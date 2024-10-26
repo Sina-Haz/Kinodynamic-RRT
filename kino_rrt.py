@@ -255,20 +255,18 @@ class KRRT:
 
             if self.in_goal(x_e):
                 print(currT + (time.time() - start), len(self.Tree))
+                path = self.recreate_path()
                 self.visualize_tree()
-                self.visualize_3D(path)
-                return self.recreate_path() # TODO: replace this with get_path function once Himani implements
+                self.visualize_mj(path)
+                return path
             end = time.time()
             currT += (end - start)
         print(currT)
         return None
     
     def recreate_path(self):
-        
-    
-        nodes = self.Tree.copy()
-        nodes.reverse()
-        curr = nodes[0]
+
+        curr = self.Tree[-1] # Last node to be appended is in the goal state
         path = []
 
         while curr.parent:
@@ -290,7 +288,7 @@ class KRRT:
 
     def visualize_3D(self, path):
         #video is quick, so leaves time for recording software to begin if necessary
-        time.sleep(20)
+        # time.sleep(20)
 
         xml = 'nav1.xml'
 
@@ -308,7 +306,38 @@ class KRRT:
             data.ctrl[:] = node.ctrl
             mujoco.mj_step(model, data)
             viewer.render()
-        viewer.close
+        viewer.close()
+
+    def visualize_mj(self, path, dt = 0.2):
+        # Load the MuJoCo model
+        model = mujoco.MjModel.from_xml_path(xml)
+
+        # Create the simulation data structure
+        data = mujoco.MjData(model)
+
+        # Create a viewer to render the simulation
+        viewer = mjv.MujocoViewer(model, data)
+
+        # Set camera parameters for bird's-eye view
+        viewer.cam.azimuth = 0  # Horizontal angle
+        viewer.cam.elevation = -60  # Directly above, looking down
+        viewer.cam.distance = 2  # Distance from the ground; adjust as needed
+        viewer.cam.lookat[:] = [0.2, 0, 0]  # Center of the scene (adjust if needed)
+
+        data.qpos[:], data.qvel = path[0].q, path[0].qdot
+        for n in path[1:]:
+            # Use only the controls
+            data.time = 0
+            data.ctrl[:] = n.ctrl
+            # Step forward using the controls
+            while data.time < dt:
+                mujoco.mj_step(model, data)
+                viewer.render()
+        viewer.close()
+
+
+        
+
 
 
 
@@ -317,6 +346,6 @@ class KRRT:
 # # Remember to treat this as a 2D problem since we have no joint on the z-axis
 # # Currently the goal attribute not used, maybe change later
 test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-1.,1.])
-print(test1.kRRT())
+test1.kRRT()
 
 
