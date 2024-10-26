@@ -256,6 +256,7 @@ class KRRT:
             if self.in_goal(x_e):
                 print(currT + (time.time() - start), len(self.Tree))
                 self.visualize_tree()
+                self.visualize_3D(path)
                 return self.recreate_path() # TODO: replace this with get_path function once Himani implements
             end = time.time()
             currT += (end - start)
@@ -263,23 +264,18 @@ class KRRT:
         return None
     
     def recreate_path(self):
-        '''
-        x_final
-        while curr.parent:
-            add to list (curr)
-            curr = curr.parent
-        '''
+        
+    
         nodes = self.Tree.copy()
         nodes.reverse()
-        path = [nodes[0]]
-        parent = nodes[0].parent
-        for node in nodes[:-1]: 
-            #equality is off
-            if (node == parent):
-                path.append(node)
-                parent = node.parent
-        path.append(nodes[-1])
+        curr = nodes[0]
+        path = []
+
+        while curr.parent:
+            path.append(curr)
+            curr = curr.parent
         path.reverse()
+
         return path
     
     def visualize_tree(self) :
@@ -288,11 +284,32 @@ class KRRT:
         ax.set_xlim(self.xbds)
         ax.set_ylim(self.ybds)
         
-        #maybe graph obstacle?
-        
         for node in self.Tree[1:]:
             ax.plot([node.q[0], node.parent.q[0]], [node.q[1], node.parent.q[1]], "-b")
         plt.show()
+
+    def visualize_3D(self, path):
+        #video is quick, so leaves time for recording software to begin if necessary
+        time.sleep(20)
+
+        xml = 'nav1.xml'
+
+        # Load the MuJoCo model
+        model = mujoco.MjModel.from_xml_path(xml)
+
+        # Create the simulation data structure
+        data = mujoco.MjData(model)
+
+        # Create a viewer to render the simulation
+        viewer = mjv.MujocoViewer(model, data)
+
+        for node in path:
+            data.qpos[:] = node.q
+            data.ctrl[:] = node.ctrl
+            mujoco.mj_step(model, data)
+            viewer.render()
+        viewer.close
+
 
 
 
@@ -302,20 +319,4 @@ class KRRT:
 test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-1.,1.])
 print(test1.kRRT())
 
-# # print(test1.kRRT_PC())
-# # print(test1.Tree)
-
-
-# s1 = Node(q=np.array([.1,0]))
-# u = np.array([0.5, 0.5])
-# print(u)
-# test1.data.ctrl = u
-# dt = 0.5
-# new, _ = test1.simulate(s1, u, dt=dt)
-# # test1.set_curr_state(s1)
-# # while test1.data.time < dt:
-# #     mujoco.mj_step(test1.model, test1.data)
-# #     new = test1.get_curr_state()
-
-# print(np.allclose(s1.q, new.q))
 
