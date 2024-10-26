@@ -3,15 +3,21 @@ import numpy as np
 import mujoco
 import mujoco_viewer as mjv
 from typing import Union, Tuple
+import time
 
 xml = 'nav1.xml'
+T_max = 30
 
 class Node:
     def __init__(self, q,  qdot=np.array([0, 0]), parent=None) -> None:
         self.q = q
         self.qdot = qdot
         self.parent = parent
-        # self.ctrl = None
+        self.ctrl = None
+
+    
+    def __repr__(self) -> str:
+        return f'Node(q = {self.q}, qdot = {self.qdot}, ctrl = {self.ctrl})'
 
 
 def weighted_euclidean_distance(x1: Node, x2: Node, pw: float = 1, vw: float = 0.1) -> float:
@@ -24,8 +30,45 @@ def weighted_euclidean_distance(x1: Node, x2: Node, pw: float = 1, vw: float = 0
     weighted_dist = np.sqrt(pw*pos_diff**2 + vw*v_diff**2)
     return weighted_dist
 
+
+
 def ctrl_effort_distance(x1: Node, x2: Node) -> float:
     raise NotImplementedError
+
+
+
+def sample_state(bounds: np.array)->Node:
+    '''
+    Uniformly samples: 
+        - configuration within bounds  
+        - qdot from standard normal
+        - Returns a node with this data and uninitialized parent
+    '''
+    # Bounds have the shape (q, 2) -> each row is for a q_i has lower and upper bound for q_i
+    q = np.random.uniform(low=bounds[:, 0], high=bounds[:, 1])
+
+    # Return qdot from a standard normal population with same shape as q
+    qdot = np.random.normal(size=q.shape)
+
+    return Node(q=q, qdot=qdot)
+
+
+def sample_non_colliding(sampler_fn, collision_checker, sample_bounds):
+    '''
+    A generic function that takes in a sampler and collision checker as function pointers and continues sampling with
+    The sampler until it gets to a non-colliding state.
+
+    sampler_fn should only need bounds as argument (everything else either keyword argument or not provided here)
+
+    collision checker should take in output of sampler function and return True if no collision, False if collision
+    '''
+    while True:
+        sample = sampler_fn(sample_bounds)
+        # If no collision from sample -> return this
+        if collision_checker(sample):
+            break
+    
+    return sample
 
 
 class KRRT:
@@ -38,21 +81,20 @@ class KRRT:
                 ) -> None:
         self.Tree = [Node(start)] # Tree currently stored as list, later may implement k-d tree for faster check
         self.goal = goal # Stores goal config
-        self.t = 0 # Time the simulation has run for
         model = mujoco.MjModel.from_xml_path(xml) # Mujoco model of our environment
         self.model = model
-        self.sim = mujoco.MjSim(model)
+        self.data = mujoco.MjData(model)
         self.xbds = xbounds # where we can sample from on x-axis (np.array w/ shape (2, ))
         self.ybds = ybounds # where we can sample from on y-axis (np.array w/ shape (2, ))
         self.ctrl_lim = ctrl_limits # Limits of our actuators, assuming they're uniform (np.array w/ shape (2, ))
-        self.robot_id = mujoco.mj_name2id()
+        # self.robot_id = mujoco.mj_name2id()
 
     def get_curr_state(self)->Node:
         '''
         This function indexes into the current mujoco data and returns a node containing the current configuration
         and velocity of the robot at this point in time
         '''
-        return Node(self.sim.data.qpos, self.sim.data.qvel)
+        return Node(self.data.qpos, self.data.qvel)
 
     def set_curr_state(self, x: Node)->bool:
         '''
@@ -61,28 +103,14 @@ class KRRT:
         True ->  No collision, False -> Collision
         '''
         # Set configuration and velocity
-        self.sim.data.qpos[:] = x.q
-        self.sim.data.qvel[:] = x.qdot
+        self.data.qpos[:] = x.q
+        self.data.qvel[:] = x.qdot
 
-        self.sim.step() # step the simulation to update collision data
+        mujoco.mj_step(self.model, self.data) # step the simulation to update collision data
 
-        self.sim.data.time = 0 # set the time to 0
+        self.data.time = 0 # Set the model time to 0
 
-        return self.sim.data.ncon == 0
-
-
-
-    def sample_state(self)->Node:
-        '''
-        Uniformly samples: 
-         - configuration within bounds  
-         - qdot from standard normal
-         - Returns a node with this data and uninitialized parent
-        '''
-        x, y = np.random.uniform(self.xbds[0],self.xbds[1]), np.random.uniform(self.ybds[0],self.ybds[1])
-        qdot = np.random.normal(size=(2,))
-
-        return Node(q=np.array([x,y]), qdot=qdot)
+        return self.data.ncon == 0
     
 
     def nearest_neighbor(self, x: Node, distance_metric = weighted_euclidean_distance) -> Node:
@@ -122,7 +150,7 @@ class KRRT:
          Either returns the best control and x_e or None and x1 if all of sampled the controls resulted in a collision
         '''
 
-        sample_ctrls = [self.sample_ctrl() for i in range(n)]
+        sample_ctrls = [self.sample_ctrl() for _ in range(n)]
         min_dist = float('inf')
         best_ctrl, x_e = None, x1
 
@@ -146,17 +174,17 @@ class KRRT:
 
         if collides: return (state, True, 0) # Don't even bother simulating
 
-        while self.sim.data.time < dt:
-            self.sim.step()
+        while self.data.time < dt:
+            mujoco.mj_step(self.model, self.data)
             curr = self.get_curr_state()
             if self.data.ncon > 0: 
                 collides = True
                 break
         
-        return (curr, collides, self.sim.data.time)
+        return (curr, collides, self.data.time)
         
 
-    def in_goal(self, state):
+    def in_goal(self, state: Node):
         #id = self.model.site_name2id('target4')
         goal_pos = self.model.site("target4").pos
         goal_size = self.model.site("target4").size
@@ -173,15 +201,47 @@ class KRRT:
 
 
     
-    def kRRT_X(self, tmax):
+    def kRRT(self):
         '''
-        
+        Runs the kRRT algorithm using the data and methods within the class.
+        Goes as follows:
+        while time < T_max:
+            x_rand = sample()
+            x_near = Nearest(Tree, x_rand)
+            u_e = Choose-Control(x_near, x_rand)
+            x_e = Simulate(x_near, u_e)
+            if not collision(path(x_near, x_e)):
+			    add edge x_near -> x_e to T
+		    if x_e in Goal:
+			    return path(x_0, x_e)
+	    return No Path
         '''
-        while (self.t < tmax):
-            x_rand = self.sample_state()
+        curr = 0
+        while curr < T_max: # Small for loop to check functionality
+            start = time.time()
+            x_rand = sample_non_colliding(sampler_fn=sample_state,
+                                          collision_checker=self.set_curr_state,
+                                          sample_bounds=np.array([self.xbds, self.ybds]))
+            # This is a node within our tree so unless it's the start its guaranteed to have a parent
             x_near = self.nearest_neighbor(x_rand)
-            u_e, x_e = self.sample_best_ctrl(x_rand, x_near)
-            if (u_e is not None):
+
+            u, x_e = self.sample_best_ctrl(x_near, x_rand)
+            if u is not None: #i.e. if there was a control that didn't result in a collision
+                x_e.parent = x_rand
+                x_e.ctrl = u
                 self.Tree.append(x_e)
-                #check if x_e in goal
-                    #break
+            
+                if self.in_goal(x_e):
+                    print(curr + (time.time() - start), len(self.Tree))
+                    return True # TODO: replace this with get_path function once Himani implements
+            end = time.time()
+            curr += (end - start)
+        print(curr)
+        return False
+
+
+# Remember to treat this as a 2D problem since we have no joint on the z-axis
+# Currently the goal attribute not used, maybe change later
+test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-.5, .5])
+print(test1.kRRT())
+# print(test1.Tree)

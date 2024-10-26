@@ -18,9 +18,9 @@ jy_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, 'joint_y')
 
 print(f'Joint indices: {jx_id, jy_id}')
 
-for i in range(150):
+while True:
     mujoco.mj_step(model, data)
     viewer.render()
-    if i % 20 == 0: print(f'Full world configuration: {data.qpos}, Full world velocities: {data.qvel}')
+    # if i % 20 == 0: print(f'Full world configuration: {data.qpos}, Full world velocities: {data.qvel}')
 
 viewer.close()
