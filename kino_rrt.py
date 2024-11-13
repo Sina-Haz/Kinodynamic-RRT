@@ -5,6 +5,8 @@ import mujoco_viewer as mjv
 import matplotlib.pyplot as plt
 from typing import Union, Tuple
 import time
+import cv2
+
 
 xml = 'nav1.xml'
 T_max = 30
@@ -217,7 +219,7 @@ class KRRT:
 
 
     
-    def kRRT(self):
+    def kRRT(self, fpath = None):
         '''
         Runs the kRRT algorithm using the data and methods within the class.
         Goes as follows:
@@ -256,8 +258,11 @@ class KRRT:
             if self.in_goal(x_e):
                 print(currT + (time.time() - start), len(self.Tree))
                 path = self.recreate_path()
-                self.visualize_tree()
-                self.visualize_mj(path)
+                if not fpath:
+                    self.visualize_tree()
+                    self.visualize_mj(path)
+                else:
+                    self.record_mujoco_video(path)
                 return path
             end = time.time()
             currT += (end - start)
@@ -335,6 +340,43 @@ class KRRT:
                 viewer.render()
         viewer.close()
 
+    
+    def record_mujoco_video(self,path, fpath='imgs/mj_video.mp4', frame_width=640, frame_height=480):
+        dt = 0.2
+        # Load the MuJoCo model
+        model = mujoco.MjModel.from_xml_path(xml)
+        # Create the simulation data structure
+        data = mujoco.MjData(model)
+        # Initialize viewer in window mode
+        viewer = mjv.MujocoViewer(model, data, mode='offscreen')
+
+
+        # Set camera parameters for bird's-eye view
+        viewer.cam.azimuth = 0  # Horizontal angle
+        viewer.cam.elevation = -60  # Directly above, looking down
+        viewer.cam.distance = 2  # Distance from the ground; adjust as needed
+        viewer.cam.lookat[:] = [0.2, 0, 0]  # Center of the scene
+
+
+        # Initialize video writer for saving the video
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(fpath, fourcc, 30.0, (frame_width, frame_height))
+
+        data.qpos[:], data.qvel[:] = path[0].q, path[0].qdot
+        for n in path[1:]:
+            # Use only the controls
+            data.time = 0
+            data.ctrl[:] = n.ctrl
+            # Step forward using the controls
+            while data.time < dt:
+                mujoco.mj_step(model, data)
+                frame = viewer.read_pixels()
+                resized = cv2.resize(frame, (frame_width, frame_height) )
+                out.write(resized)
+        out.release()
+        viewer.close()
+
+
 
         
 
@@ -346,6 +388,6 @@ class KRRT:
 # # Remember to treat this as a 2D problem since we have no joint on the z-axis
 # # Currently the goal attribute not used, maybe change later
 test1 = KRRT(start=np.array([0, 0]), goal=None, xbounds=[-.2, 1.1], ybounds=[-.36, .36], ctrl_limits=[-1.,1.])
-test1.kRRT()
+test1.kRRT(fpath='str')
 
 
